@@ -19,6 +19,7 @@ use serde_json::{Value, from_str, to_string, json};
 use std::cell::RefCell;
 use std::{thread, time};
 use ordinals::{Edict, Etching, Rune, RuneId, Runestone, Terms};
+use runes::rune_id;
 
 fn get_trader(trader_id: u64) -> (Keypair, XOnlyPublicKey, Address) {
     let secp = Secp256k1::new();
@@ -131,7 +132,7 @@ fn send_premine_tx() -> Txid {
     rpc.send_raw_transaction(premine_tx.raw_hex()).unwrap()
 }
 
-fn airdrop_runes(txid: Txid) {
+fn airdrop_runes(txid: Txid) -> Txid {
     let rpc = Client::new("https://bitcoin-node.dev.aws.archnetwork.xyz:18443/wallet/testwallet",
                 Auth::UserPass("bitcoin".to_string(),
                                 "428bae8f3c94f8c39c50757fc89c39bc7e6ebc70ebf8f618".to_string())).unwrap();
@@ -211,7 +212,120 @@ fn airdrop_runes(txid: Txid) {
     airdrop_tx.input[0].witness.push(signature.to_vec());
 
     // BOOM! Transaction signed and ready to broadcast.
-    println!("{:?}", rpc.send_raw_transaction(airdrop_tx.raw_hex()).unwrap());
+    rpc.send_raw_transaction(airdrop_tx.raw_hex()).unwrap()
+}
+
+#[derive(Serialize, Deserialize, Debug, BorshSerialize, BorshDeserialize, Default)]
+pub struct OpenPoolParams {
+    pub creator: String,
+    pub fee_address: String,
+    pub liq_ratio: u64,
+    pub rune_id: rune_id::RuneId,
+    pub fee_txid: String,
+    pub fee_vout: u32,
+    pub buy_fee: Option<u64>,
+    pub sell_fee: Option<u64>,
+}
+
+#[derive(Serialize, Deserialize, Debug, BorshSerialize, BorshDeserialize)]
+enum Method {
+    OpenPool,
+    AddLiquidity,
+    RemoveLiquidity,
+    SwapBtcForRunes,
+    SwapRunesForBtc,
+    // ClaimFees,
+    // UpdateFees,
+}
+
+#[derive(Serialize, Deserialize, Debug, BorshSerialize, BorshDeserialize)]
+struct DexInstruction {
+    method: Method,
+    data: Vec<u8>,
+}
+
+fn open_pool_test(program_id: Pubkey, fee_txid: String, fee_vout: u32) -> Txid {
+    let secp = Secp256k1::new();
+    let secret_key = match fs::read_to_string(".arch/trader0.json") {
+        Ok(data) => {
+            SecretKey::from_str(&data).unwrap()
+        },
+        Err(_) => {
+            let (sec_key, _) = secp.generate_keypair(&mut OsRng);
+            fs::write(".arch/trader0.json", &sec_key.display_secret().to_string()).expect("Unable to write file");
+            sec_key
+        }
+    };
+
+    let key_pair = UntweakedKeypair::from_secret_key(&secp, &secret_key);
+    let (public_key, _parity) = XOnlyPublicKey::from_keypair(&key_pair);
+
+    let data = borsh::to_vec(&OpenPoolParams {
+        creator: "".to_string(),
+        fee_address: "".to_string(),
+        liq_ratio: 0,
+        rune_id: rune_id::RuneId {
+            block: 1,
+            tx: 4
+        },
+        fee_txid,
+        fee_vout,
+        buy_fee: None,
+        sell_fee: None,
+    }).unwrap();
+
+    let mut instruction_data = vec![0];
+    instruction_data.extend(borsh::to_vec(&DexInstruction {
+        method: Method::OpenPool,
+        data
+    }).unwrap());
+
+    let instruction = Instruction {
+        program_id,
+        utxos: vec![
+            UtxoMeta {
+                txid,
+                vout
+            }
+        ],
+        data: instruction_data
+    };
+
+    let message = Message {
+        signers: vec![Pubkey(public_key.serialize().to_vec())],
+        instructions: vec![instruction]
+    };
+
+    let digest_slice = hex::decode(message.hash().unwrap()).unwrap();
+
+    let sig_message = secp256k1::Message::from_digest_slice(&digest_slice).unwrap();
+
+    let sig = secp.sign_schnorr(&sig_message, &key_pair);
+
+    let params = RuntimeTransaction {
+        version: 0,
+        signatures: vec![
+            Signature(sig.serialize().to_vec())
+        ],
+        message
+    };
+
+    let client = reqwest::blocking::Client::new();
+    let res = client.post("http://127.0.0.1:9001/")
+        .header("content-type", "application/json")
+        .json(&json!({
+            "jsonrpc": "2.0", 
+            "id": "curlycurl", 
+            "method": "send_transaction",
+            "params": params
+        }))
+        .send()
+        .unwrap();
+
+    let result = from_str::<Value>(&res.text().unwrap()).unwrap();
+
+    println!("send transaction test {:?}", result);
+    result["result"].as_str().unwrap().to_string()
 }
 
 fn main() {
@@ -220,7 +334,18 @@ fn main() {
                 Auth::UserPass("bitcoin".to_string(),
                                 "428bae8f3c94f8c39c50757fc89c39bc7e6ebc70ebf8f618".to_string())).unwrap();
 
-    airdrop_runes(send_premine_tx());
+    let airdropped_rune_tx = airdrop_runes(send_premine_tx());
+    let deployed_program_id = Pubkey(hex::decode(deploy_program_test()).unwrap());
+
+    let state_txid = send_utxo();
+
+    assign_authority_test(
+        Utxo { txid: state_txid.clone(), vout: 1, value: 1500 }, 
+        deployed_program_id.clone(),
+        vec![]
+    );
+
+    read_utxo(format!("{}:1", state_txid.clone()));
     
 /*
     let (trader0_keypair, trader0_public_key) = get_trader(0);
@@ -286,13 +411,13 @@ pub struct BridgeParams {
 fn send_transaction_test(program_id: Pubkey, txid: String, vout: u32, fee_txid: String) -> String {
 
     let secp = Secp256k1::new();
-    let secret_key = match fs::read_to_string(".programs/corridor.json") {
+    let secret_key = match fs::read_to_string(".arch/trader0.json") {
         Ok(data) => {
             SecretKey::from_str(&data).unwrap()
         },
         Err(_) => {
             let (sec_key, _) = secp.generate_keypair(&mut OsRng);
-            fs::write(".programs/corridor.json", &sec_key.display_secret().to_string()).expect("Unable to write file");
+            fs::write(".arch/trader0.json", &sec_key.display_secret().to_string()).expect("Unable to write file");
             sec_key
         }
     };
@@ -477,18 +602,18 @@ fn get_processed_transaction(txid: String) {
 
 fn send_utxo() -> String {
 
-    let rpc = Client::new("https://bitcoin-node.dev.aws.archnetwork.xyz:18443",
+    let rpc = Client::new("https://bitcoin-node.dev.aws.archnetwork.xyz:18443/wallet/testwallet",
                 Auth::UserPass("bitcoin".to_string(),
                                 "428bae8f3c94f8c39c50757fc89c39bc7e6ebc70ebf8f618".to_string())).unwrap();
 
     let secp = Secp256k1::new();
-    let secret_key = match fs::read_to_string(".programs/corridor.json") {
+    let secret_key = match fs::read_to_string(".arch/trader0.json") {
         Ok(data) => {
             SecretKey::from_str(&data).unwrap()
         },
         Err(_) => {
             let (sec_key, _) = secp.generate_keypair(&mut OsRng);
-            fs::write(".programs/corridor.json", &sec_key.display_secret().to_string()).expect("Unable to write file");
+            fs::write(".arch/trader0.json", &sec_key.display_secret().to_string()).expect("Unable to write file");
             sec_key
         }
     };
@@ -500,11 +625,7 @@ fn send_utxo() -> String {
 
     println!("{:?}", address);
 
-    //let res = rpc.generate_to_address(101, &address).unwrap();
-
-    let utxos = get_address_utxos(&rpc, address.to_string());
-
-    println!("{:#?}", utxos);
+    let txid = rpc.send_to_address(&address, Amount::from_sat(3000), None, None, None, None, None, None).unwrap();
 
     let network_address = get_network_address("");
 
@@ -515,8 +636,8 @@ fn send_utxo() -> String {
         input: vec![
             TxIn {
                 previous_output: OutPoint {
-                    txid: Txid::from_str(&utxos[0]["txid"].as_str().unwrap()).unwrap(),
-                    vout: utxos[0]["vout"].as_u64().unwrap() as u32
+                    txid,
+                    vout: 0
                 },
                 script_sig: ScriptBuf::new(),
                 sequence: Sequence::MAX,
@@ -531,10 +652,6 @@ fn send_utxo() -> String {
             TxOut {
                 value: Amount::from_sat(1500),
                 script_pubkey: Address::from_str(&network_address).unwrap().require_network(bitcoin::Network::Regtest).unwrap().script_pubkey()
-            },
-            TxOut {
-                value: Amount::from_sat(utxos[0]["value"].as_u64().unwrap() - 1500 - 1000),
-                script_pubkey: address.script_pubkey()
             }
         ],
         lock_time: LockTime::ZERO
@@ -542,7 +659,7 @@ fn send_utxo() -> String {
 
     let sighash_type = TapSighashType::Default;
     let prevouts = vec![
-        rpc.get_raw_transaction(&Txid::from_str(&utxos[0]["txid"].as_str().unwrap()).unwrap(), None).unwrap().output[utxos[0]["vout"].as_u64().unwrap() as usize].clone()
+        rpc.get_raw_transaction(&txid, None).unwrap().output[0].clone()
     ];
     let prevouts = Prevouts::All(&prevouts);
 
@@ -568,13 +685,13 @@ fn send_utxo() -> String {
 fn assign_authority_test(utxo: Utxo, authority: Pubkey, data: Vec<u8>) {
 
     let secp = Secp256k1::new();
-    let secret_key = match fs::read_to_string(".programs/corridor.json") {
+    let secret_key = match fs::read_to_string(".arch/trader0.json") {
         Ok(data) => {
             SecretKey::from_str(&data).unwrap()
         },
         Err(_) => {
             let (sec_key, _) = secp.generate_keypair(&mut OsRng);
-            fs::write(".programs/corridor.json", &sec_key.display_secret().to_string()).expect("Unable to write file");
+            fs::write(".arch/trader0.json", &sec_key.display_secret().to_string()).expect("Unable to write file");
             sec_key
         }
     };

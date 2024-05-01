@@ -71,6 +71,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "base58"
+version = "0.1.0"
+source = "git+https://github.com/Arch-Network/bitcoin-arch.git#b33f165cedf5576de75f1f9407bedf365accd091"
+dependencies = [
+ "bitcoin_hashes 0.13.0",
+]
+
+[[package]]
 name = "base64"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -93,6 +101,12 @@ name = "bech32"
 version = "0.10.0-beta"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "98f7eed2b2781a6f0b5c903471d48e15f56fb4e1165df8a9a2337fd1a59d45ea"
+
+[[package]]
+name = "bech32"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d965446196e3b7decd44aa7ee49e31d630118f90ef12f97900f262eb915c951d"
 
 [[package]]
 name = "bitcoin"
@@ -120,6 +134,21 @@ dependencies = [
  "hex_lit",
  "secp256k1 0.28.2",
  "serde",
+]
+
+[[package]]
+name = "bitcoin-arch"
+version = "0.1.0"
+source = "git+https://github.com/Arch-Network/bitcoin-arch.git#b33f165cedf5576de75f1f9407bedf365accd091"
+dependencies = [
+ "base58",
+ "base64 0.22.1",
+ "bech32 0.11.0",
+ "bitcoin_hashes 0.13.0",
+ "borsh",
+ "hashes",
+ "hex",
+ "opcodes",
 ]
 
 [[package]]
@@ -380,6 +409,7 @@ dependencies = [
  "ordinals",
  "rand_core",
  "reqwest",
+ "runes",
  "serde",
  "serde_json",
  "sha256",
@@ -563,6 +593,12 @@ name = "hashbrown"
 version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
+
+[[package]]
+name = "hashes"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ae25ccbcba51b77f4ffd55cd0221c84e0e2958a13669d97775ccd43ce6f2873"
 
 [[package]]
 name = "hermit-abi"
@@ -892,6 +928,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3fdb12b2476b595f9358c5161aa467c2438859caa136dec86c26fdd2efe17b92"
 
 [[package]]
+name = "opcodes"
+version = "0.1.0"
+source = "git+https://github.com/Arch-Network/bitcoin-arch.git#b33f165cedf5576de75f1f9407bedf365accd091"
+
+[[package]]
 name = "openssl"
 version = "0.10.64"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1125,6 +1166,18 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-sys",
  "winreg",
+]
+
+[[package]]
+name = "runes"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin-arch",
+ "borsh",
+ "serde",
+ "serde_json",
+ "serde_with",
 ]
 
 [[package]]
