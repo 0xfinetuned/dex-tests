@@ -244,7 +244,7 @@ struct DexInstruction {
     data: Vec<u8>,
 }
 
-fn open_pool_test(program_id: Pubkey, fee_txid: String, fee_vout: u32) -> Txid {
+fn open_pool_test(txid: String, vout: u32, program_id: Pubkey, fee_txid: String, fee_vout: u32) -> String {
     let secp = Secp256k1::new();
     let secret_key = match fs::read_to_string(".arch/trader0.json") {
         Ok(data) => {
@@ -338,6 +338,7 @@ fn main() {
     let deployed_program_id = Pubkey(hex::decode(deploy_program_test()).unwrap());
 
     let state_txid = send_utxo();
+    let fee_txid = send_utxo();
 
     assign_authority_test(
         Utxo { txid: state_txid.clone(), vout: 1, value: 1500 }, 
@@ -345,7 +346,15 @@ fn main() {
         vec![]
     );
 
+    assign_authority_test(
+        Utxo { txid: fee_txid.clone(), vout: 1, value: 1500 }, 
+        deployed_program_id.clone(),
+        vec![]
+    );
+
     read_utxo(format!("{}:1", state_txid.clone()));
+
+    open_pool_test(state_txid.clone(), 1, deployed_program_id.clone(), fee_txid, 1);
     
 /*
     let (trader0_keypair, trader0_public_key) = get_trader(0);
