@@ -228,7 +228,7 @@ pub struct OpenPoolParams {
 }
 
 #[derive(Serialize, Deserialize, Debug, BorshSerialize, BorshDeserialize)]
-enum Method {
+pub enum Method {
     OpenPool,
     AddLiquidity,
     RemoveLiquidity,
@@ -239,7 +239,7 @@ enum Method {
 }
 
 #[derive(Serialize, Deserialize, Debug, BorshSerialize, BorshDeserialize)]
-struct DexInstruction {
+pub struct DexInstruction {
     method: Method,
     data: Vec<u8>,
 }
@@ -274,7 +274,7 @@ fn open_pool_test(txid: String, vout: u32, program_id: Pubkey, fee_txid: String,
         sell_fee: None,
     }).unwrap();
 
-    let mut instruction_data = vec![0];
+    let mut instruction_data = vec![];
     instruction_data.extend(borsh::to_vec(&DexInstruction {
         method: Method::OpenPool,
         data
@@ -636,6 +636,16 @@ fn send_utxo() -> String {
 
     let txid = rpc.send_to_address(&address, Amount::from_sat(3000), None, None, None, None, None, None).unwrap();
 
+    let sent_tx = rpc.get_raw_transaction(&txid, None).unwrap();
+    let mut vout = 0;
+    for (index, output) in sent_tx.output.iter().enumerate() {
+        if output.script_pubkey == address.script_pubkey() {
+            vout = index as u32;
+        }
+    }
+
+    println!("send utxo txid {:?}", txid);
+
     let network_address = get_network_address("");
 
     println!("{:#?}", network_address);
@@ -646,7 +656,7 @@ fn send_utxo() -> String {
             TxIn {
                 previous_output: OutPoint {
                     txid,
-                    vout: 0
+                    vout
                 },
                 script_sig: ScriptBuf::new(),
                 sequence: Sequence::MAX,
